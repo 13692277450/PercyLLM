@@ -7,6 +7,7 @@
 # ------------------------------------------------------------
 # In[2] 初始化模型与配置
 # ------------------------------------------------------------
+from datetime import datetime, time
 import importlib
 import sys
 sys.path.append('.')          # 把当前目录加入模块搜索路径，方便导入 mainCore.py
@@ -268,6 +269,7 @@ with torch.no_grad():                               # 评估时不需要梯度
     val_loss = calc_loss_loader(val_loader, model, device)
 print("Training loss:", train_loss)
 print("Validation loss:", val_loss)
+print("Time:", datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3])
 
 
 # ------------------------------------------------------------
@@ -601,8 +603,8 @@ settings, params = download_and_load_gpt2(
 params: dict[str, Any] = params
 
 
-print(settings)
-print(params.keys())
+print("Settings:", settings)
+print("Parameter dictionary keys:", params.keys())
 
 
 # ------------------------------------------------------------
@@ -615,7 +617,7 @@ print("Parameter dictionary keys:", params.keys())
 # ------------------------------------------------------------
 # In[67] 查看 token 嵌入权重
 # ------------------------------------------------------------
-print(params["wte"])
+print("Token embedding weight tensor:", params["wte"])
 
 print("Token embedding weight tensor dimensions:", params["wte"].shape)
 
