@@ -15,7 +15,7 @@ app = FastAPI(title="GPT-2 Service (HF Tokenizer Edition)")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # MODEL_DIR = "./my-gpt2-hf"
-MODEL_DIR = "./personagpt2final"
+MODEL_DIR = "./MicrosfotGPT2DialogptSmall"
 
 print("=" * 70)
 print("🚀 启动 GPT-2 服务 (HuggingFace Tokenizer Version)")

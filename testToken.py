@@ -1,14 +1,14 @@
 
 
 from transformers import GPT2Tokenizer
-tok = GPT2Tokenizer.from_pretrained("./personagpt2final")
+tok = GPT2Tokenizer.from_pretrained("././MicrosfotGPT2DialogptSmall")
 print("len(tokenizer):", len(tok))
 print(tok.encode("<|persona|>"))
 print(tok.encode("<|user|>"))
 print(tok.encode("<|bot|>"))
 
 from transformers import GPT2LMHeadModel
-model = GPT2LMHeadModel.from_pretrained("./personagpt2final")
+model = GPT2LMHeadModel.from_pretrained("././MicrosfotGPT2DialogptSmall")
 print("model.config.vocab_size =", model.config.vocab_size)
 print("wte行数 =", model.transformer.wte.weight.shape[0])
 

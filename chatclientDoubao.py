@@ -41,3 +41,32 @@ def chat():
 
 if __name__ == "__main__":
     chat()
+# from transformers import AutoModelForCausalLM, AutoTokenizer
+# import torch
+
+# tokenizer = AutoTokenizer.from_pretrained("./MicrosfotGPT2DialogptSmall")
+# model = AutoModelForCausalLM.from_pretrained("./MicrosfotGPT2DialogptSmall")
+# model.eval()
+
+# # 注意：DialoGPT 训练时用 <|endoftext|> 作为分隔符
+# # 这里我们把 persona 和 user 的话拼成一句自然语言
+# prompt = "good morning. what's your function?" + tokenizer.eos_token
+
+# inputs = tokenizer(prompt, return_tensors="pt")
+
+# with torch.no_grad():
+#     output_ids = model.generate(
+#         inputs["input_ids"],
+#         max_new_tokens=50,
+#         do_sample=True,
+#         temperature=0.8,
+#         top_k=50,
+#         pad_token_id=tokenizer.eos_token_id,
+#     )
+
+# # 只解码新生成的部分
+# reply = tokenizer.decode(
+#     output_ids[0][inputs["input_ids"].shape[-1]:],
+#     skip_special_tokens=True
+# )
+# print("Bot:", reply)

@@ -8,7 +8,7 @@ import json
 app = FastAPI(title="GPT-2 Service (HF Tokenizer Edition)")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # MODEL_DIR = "./my-gpt2-hf"
-MODEL_DIR = "./personagpt2final"
+MODEL_DIR = "./MicrosfotGPT2DialogptSmall"
 print("=" * 70)
 print("🚀 启动 GPT-2 服务 (HuggingFace Tokenizer Version)")
 print("=" * 70)
@@ -179,12 +179,13 @@ class GenerateRequest(BaseModel):
     persona: str
     user_text: str
     max_new_tokens: int = 50
-    temperature: float = 1.0
+    temperature: float = 0.7
     top_k: int = 50
+    top_p: float = 0.95                 # 新增
+    repetition_penalty: float = 1.1     # 新增
 
 class GenerateResponse(BaseModel):
     generated_text: str
-
 @app.post("/generate", response_model=GenerateResponse)
 async def generate_text(request: GenerateRequest):
     try:
@@ -199,12 +200,10 @@ async def generate_text(request: GenerateRequest):
         if not request.user_text or not request.user_text.strip():
             return _error_response("user_text用户输入不能为空!")
 
-        # 拼接训练时使用的prompt模板
-        prompt = f"<|persona|>{request.persona}<|user|>{request.user_text}<|bot|>"
+        # DialoGPT 原生格式：persona + user + <|endoftext|>
+        prompt = f"{request.persona} {request.user_text}" + tokenizer.eos_token
         print(f"   📌 完整prompt: {prompt}")
 
-        # Tokenization（HF tokenizer）
-        print(f"   🔤 Tokenization (HF GPT2Tokenizer)...")
         inputs = tokenizer(prompt, return_tensors="pt")
         inputs = {k: v.to(device) for k, v in inputs.items()}
         ids = inputs['input_ids']
@@ -213,30 +212,29 @@ async def generate_text(request: GenerateRequest):
         if ids.numel() == 0:
             return _error_response("Tokenization 返回空结果!")
 
-        # 生成
         print(f"   🚀 生成中...")
         with torch.no_grad():
-            outputs = model.generate(  # pyright: ignore[reportAttributeAccessIssue]
+            outputs = model.generate(
                 **inputs,
                 max_new_tokens=request.max_new_tokens,
                 temperature=request.temperature,
                 top_k=request.top_k,
                 do_sample=True,
                 pad_token_id=tokenizer.pad_token_id,
+                top_p=request.top_p,                          # 新增
+                repetition_penalty=request.repetition_penalty,# 新增
             )
-        # 完整解码
-        full_decoded = tokenizer.decode(outputs[0], skip_special_tokens=False)
-        # 截取 <|bot|> 后面的内容作为回答
-        bot_tag = "<|bot|>"
-        if bot_tag in full_decoded:
-            bot_reply = full_decoded.split(bot_tag)[-1].strip()
-        else:
-            bot_reply = full_decoded.strip()
+
+        # ✅ 只解码新生成的部分，去掉输入的 prompt
+        input_len = ids.shape[-1]
+        new_tokens = outputs[0][input_len:]
+        bot_reply = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
         print(f"   ✅ 生成完成!")
-        print(f"   🤖 Bot回答: '{bot_reply[:150]}...'")
+        print(f"   🤖 Bot回答: '{bot_reply[:150]}'")
         print(f"{'─' * 70}\n")
         return GenerateResponse(generated_text=bot_reply)
+
     except Exception as e:
         print(f"\n❌ 错误: {str(e)}")
         import traceback
