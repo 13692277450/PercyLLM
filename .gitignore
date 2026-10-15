@@ -184,3 +184,7 @@ cython_debug/
 .pth
 .safetensors
 .data-00000-of-00001
+my-gpt2-hf/model.safetensors
+gpt/124M/model.ckpt.data-00000-of-00001
+*.pth
+*.safetensors
