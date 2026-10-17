@@ -202,18 +202,21 @@ tokenizer = tiktoken.get_encoding("gpt2")
 batch = []  # 用列表暂存每条样本的 token id 张量
 txt1 = "Every effort moves you"  # 第一句
 txt2 = "Every day holds a"       # 第二句
+txt3 = "How are you today"       # 第三句
+
 
 # tokenizer.encode(str) -> list[int]
 # torch.tensor(list) -> 一维张量,pytorch 只接受张量作为输入
 batch.append(torch.tensor(tokenizer.encode(txt1)))
 batch.append(torch.tensor(tokenizer.encode(txt2)))
+batch.append(torch.tensor(tokenizer.encode(txt3)))
 
-# torch.stack(batch, dim=0)：把两个形状 (seq_len,) 的张量堆成 (2, seq_len)
+# torch.stack(batch, dim=0)：把三个形状 (seq_len,) 的张量堆成 (3, seq_len)
 # 第一维是 batch，第二维是序列长度
 # 注意：要求两条句子 token 数相同（这里恰好都是 5）
 batch = torch.stack(batch, dim=0)
 
-print("\n===== 输出：把两句话编码成 token，并堆叠成 batch =====\n")
+print("\033[31m \n===== 输出：把两句话编码成 token，并堆叠成 batch =====\n\033[0m")
 print(batch)
 
 
@@ -228,7 +231,7 @@ model_dummy = DummyGPTModel(GPT_CONFIG_124M)
 # 前向传播：输入 (2, 5) 的 token id，输出 (2, 5, 50257) 的 logits
 logits_dummy = model_dummy(batch)
 
-print("\n===== 输出：占位模型的前向输出形状与内容 =====\n")
+print("\033[31m \n===== 输出：占位模型的前向输出形状与内容 =====\n\033[0m")
 print("Output shape:", logits_dummy.shape)  # 应为 torch.Size([2, 5, 50257])
 print(logits_dummy)
 
@@ -276,7 +279,7 @@ out_norm = (out - mean) / torch.sqrt(var)
 mean = out_norm.mean(dim=-1, keepdim=True)
 var = out_norm.var(dim=-1, keepdim=True)
 
-print("\n===== 输出：手动归一化后的输出、均值、方差 =====\n")
+print("\033[31m \n===== 输出：手动归一化后的输出、均值、方差 =====\n\033[0m")
 print("Normalized layer outputs:\n", out_norm)
 print("Mean:\n", mean)
 print("Variance:\n", var)
@@ -285,7 +288,7 @@ print("Variance:\n", var)
 # 关闭科学计数法，方便肉眼查看
 torch.set_printoptions(sci_mode=False)
 
-print("\n===== 输出：关闭科学计数法后重新打印均值/方差 =====\n")
+print("\033[32m \n===== 输出：关闭科学计数法后重新打印均值/方差 =====\n\033[0m")
 print("Mean:\n", mean)
 print("Variance:\n", var)
 
@@ -398,7 +401,7 @@ for i, (y, label) in enumerate(zip([y_gelu, y_relu], ["GELU", "ReLU"]), 1):
 
 plt.tight_layout()  # 自动调整子图间距
 
-print("\n===== 输出：GELU 与 ReLU 激活函数曲线对比图 =====\n")
+print("\033[33m \n===== 输出：GELU 与 ReLU 激活函数曲线对比图 =====\n\033[0m")
 plt.show()
 
 
@@ -428,7 +431,9 @@ class FeedForward(nn.Module):
             # 第二层：3072 -> 768，恢复到原始维度
             nn.Linear(4 * cfg["emb_dim"], cfg["emb_dim"]),
         )
-
+        print(f"\033[34m \n===== 输出：前馈网络参数量 =====\n\033[0m")
+        total_params = sum(p.numel() for p in self.layers.parameters())
+        print(f"\033[32m 总参数量: {total_params}\033[0m")
     def forward(self, x):
         # 逐层前向，形状不变：(..., emb_dim) -> (..., emb_dim)
         return self.layers(x)
@@ -440,8 +445,7 @@ ffn = FeedForward(GPT_CONFIG_124M)
 # 输入形状 (batch=2, seq_len=3, emb_dim=768)
 x = torch.rand(2, 3, 768)
 out = ffn(x)
-
-print("\n===== 输出：前馈网络的输出形状 =====\n")
+print("\033[32m \n===== 输出：前馈网络的输出形状 =====\n\033[0m")   
 print(out.shape)  # 应为 torch.Size([2, 3, 768])
 
 
@@ -474,6 +478,9 @@ class ExampleDeepNeuralNetwork(nn.Module):
             nn.Sequential(nn.Linear(layer_sizes[3], layer_sizes[4]), GELU()),
             nn.Sequential(nn.Linear(layer_sizes[4], layer_sizes[5]), GELU()),
         ])
+        print(f"\033[34m \n===== 输出：小网络参数量 =====\n\033[0m")
+        total_params = sum(p.numel() for p in self.layers.parameters())
+        print(f"\033[32m 总参数量: {total_params}\033[0m")
 
     def forward(self, x):
         for layer in self.layers:
@@ -501,6 +508,8 @@ def print_gradients(model, x):
     # 均方误差损失
     loss_fn = nn.MSELoss()
     loss = loss_fn(output, target)
+    print(f"\033[32m 损失值: {loss.item()}\n\033[0m")
+    print(f"\033[32m 输出: {output.item()}\n\033[0m")
 
     # 反向传播，计算梯度
     loss.backward()
@@ -508,7 +517,7 @@ def print_gradients(model, x):
     # 遍历所有参数，打印权重梯度的平均绝对值
     for name, param in model.named_parameters():
         if 'weight' in name:
-            print(f"{name} has gradient mean of {param.grad.abs().mean().item()}")
+            print(f"\033[32m {name} has gradient mean of {param.grad.abs().mean().item()}\033[0m")
 
 
 # 每层维度：3 -> 3 -> 3 -> 3 -> 3 -> 1
@@ -521,14 +530,14 @@ sample_input = torch.tensor([[1., 0., -1.]])
 torch.manual_seed(123)  # 固定权重初始化
 model_without_shortcut = ExampleDeepNeuralNetwork(layer_sizes, use_shortcut=False)
 
-print("\n===== 输出：无 shortcut 时各层权重的平均梯度（会逐层变小，梯度消失）=====\n")
+print("\033[32m \n===== 输出：无 shortcut 时各层权重的平均梯度（会逐层变小，梯度消失）=====\n\033[0m")
 print_gradients(model_without_shortcut, sample_input)
 
 # ---- 使用残差 ----
 torch.manual_seed(123)  # 同样种子，保证公平比较
 model_with_shortcut = ExampleDeepNeuralNetwork(layer_sizes, use_shortcut=True)
 
-print("\n===== 输出：有 shortcut 时各层权重的平均梯度（梯度更稳定）=====\n")
+print("\033[32m \n===== 输出：有 shortcut 时各层权重的平均梯度（梯度更稳定）=====\n\033[0m")
 print_gradients(model_with_shortcut, sample_input)
 
 
@@ -556,7 +565,7 @@ class MultiHeadAttention(nn.Module):
     """多头因果自注意力。"""
 
     def __init__(self, d_in, d_out,
-                 context_length, dropout, num_heads, qkv_bias=False):
+                context_length, dropout, num_heads, qkv_bias=False):
         super().__init__()
 
         # 断言：输出维度必须能被头数整除
@@ -576,7 +585,10 @@ class MultiHeadAttention(nn.Module):
 
         # 对注意力权重做 dropout
         self.dropout = nn.Dropout(dropout)
-
+        print(f"\033[34m \n===== 输出：多头自注意力参数量Dropout =====\n\033[0m")
+        for i in self.dropout.parameters():
+            print(f"\033[32m Dropout rate: {i}\033[0m")
+        
         # 注册因果 mask：上三角矩阵（不含对角线）
         # torch.triu(..., diagonal=1)：取主对角线以上的元素
         # register_buffer：让 mask 跟随模型迁移到 GPU，但不是可学习参数
@@ -584,6 +596,7 @@ class MultiHeadAttention(nn.Module):
             'mask',
             torch.triu(torch.ones(context_length, context_length), diagonal=1)
         )
+        
 
     def forward(self, x):
         # 解包输入形状
@@ -787,7 +800,7 @@ model = GPTModel(GPT_CONFIG_124M)
 # 用前面构造的 batch 前向
 out = model(batch)
 
-print("\n===== 输出：GPT 模型对输入 batch 的输出形状与内容 =====\n")
+print("\033[32m \n===== 输出：GPT 模型对输入 batch 的输出形状与内容 =====\n\033[0m")
 print("Input batch:\n", batch)
 print("\nOutput shape:", out.shape)  # (2, 5, 50257)
 print(out)
@@ -801,13 +814,13 @@ print(out)
 # sum(...) 累加所有参数
 total_params = sum(p.numel() for p in model.parameters())
 
-print("\n===== 输出：模型参数总量 =====\n")
+print("\033[32m \n===== 输出：模型参数总量 =====\n\033[0m")
 print(f"Total number of parameters: {total_params:,}")
 
 # 查看 token 嵌入层和输出层的权重形状
-print("\n===== 输出：token 嵌入层与输出层的权重形状 =====\n")
-print("Token embedding layer shape:", model.tok_emb.weight.shape)
-print("Output layer shape:", model.out_head.weight.shape)
+print("\033[32m \n===== 输出：token 嵌入层与输出层的权重形状 =====\n\033[0m")
+print("\033[32mToken embedding layer shape:", model.tok_emb.weight.shape)
+print("\033[32mOutput layer shape:", model.out_head.weight.shape)
 
 # 权重共享后：
 #   如果输出头与 token 嵌入共享权重，则参数量要减去输出头
@@ -815,9 +828,9 @@ total_params_gpt2 = total_params - sum(
     p.numel() for p in model.out_head.parameters()
 )
 
-print("\n===== 输出：考虑权重共享后的可训练参数量 =====\n")
-print(f"Number of trainable parameters considering weight tying: "
-      f"{total_params_gpt2:,}")
+print("\033[32m \n===== 输出：考虑权重共享后的可训练参数量 =====\n\033[0m")
+print("\033[32mNumber of trainable parameters considering weight tying: "
+    f"{total_params_gpt2:,}")
 
 # 假设每个参数是 float32（4 字节）
 total_size_bytes = total_params * 4
@@ -885,7 +898,7 @@ def generate_text_simple(model, idx, max_new_tokens, context_size):
 
 
 # ---- 使用生成函数 ----
-start_context = "Hello, I am"
+start_context = "Hello, I am a language model, and I can generate text."
 
 # 编码起始文本
 encoded = tokenizer.encode(start_context)
@@ -893,9 +906,9 @@ encoded = tokenizer.encode(start_context)
 # 增加 batch 维度：(seq_len,) -> (1, seq_len)
 encoded_tensor = torch.tensor(encoded).unsqueeze(0)
 
-print("\n===== 输出：起始文本编码后的 token 列表与张量形状 =====\n")
-print("encoded:", encoded)
-print("encoded_tensor.shape:", encoded_tensor.shape)
+print("\033[32m \n===== 输出：起始文本编码后的 token 列表与张量形状 =====\n\033[0m")
+print("\033[32mencoded:", encoded)
+print("\033[32mencoded_tensor.shape:", encoded_tensor.shape)
 
 # 推理模式：关闭 dropout
 model.eval()
@@ -907,12 +920,12 @@ out = generate_text_simple(
     context_size=GPT_CONFIG_124M["context_length"],
 )
 
-print("\n===== 输出：生成后的 token 张量及序列长度 =====\n")
-print("Output:", out)
-print("Output length:", len(out[0]))
+print("\033[31m \n===== 输出：生成后的 token 张量及序列长度 =====\n\033[0m")
+print("\033[32mOutput:", out)
+print("\033[33mOutput length:", len(out[0]))
 
 # 把 token id 解码回文本
 decoded_text = tokenizer.decode(out.squeeze(0).tolist())
 
-print("\n===== 输出：把生成的 token 解码回文本 =====\n")
-print(decoded_text)
+print("\033[32m \n===== 输出：把生成的 token 解码回文本 =====\n\033[0m")
+print("\033[32m", decoded_text)

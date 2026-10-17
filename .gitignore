@@ -190,3 +190,4 @@ gpt/124M/model.ckpt.data-00000-of-00001
 *.safetensors
 /hfgpt2traindata
 /MicrosfotGPT2DialogptSmall
+MicrosfotGPT2DialogptSmall.zip
