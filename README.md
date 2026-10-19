@@ -1,2 +1,2 @@
 # PercyLLM
-An Open Source LLM
+An Open Source LLM, learning in progress...
