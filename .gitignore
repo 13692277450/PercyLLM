@@ -191,3 +191,6 @@ gpt/124M/model.ckpt.data-00000-of-00001
 /hfgpt2traindata
 /MicrosfotGPT2DialogptSmall
 MicrosfotGPT2DialogptSmall.zip
+/MicrosoftGPT2DialogptSmall
+/my_first_lora0.pt
+hfgpt2traindata.zip

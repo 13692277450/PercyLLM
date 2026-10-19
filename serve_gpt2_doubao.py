@@ -163,8 +163,15 @@ print("   ✅ 特殊token校验完成")
 # ============================================================
 # 3. 模型切到评估模式
 # ============================================================
-print("\n🎯 步骤 3/3: 模型切到评估模式...")
-model.eval()
+print("\n🎯 步骤 3/3: 模型切到评估模式...") #在 PyTorch 中，模型有且只有两种模式：训练模式（model.train()） 和 评估模式（model.eval()）
+model.eval() #到底改变了什么？
+# 在模型内部，主要影响两个特殊的网络层：
+# Dropout 层（随机失活）：
+# 训练模式下：Dropout 会以设定的概率（比如 10%）随机“掐断”一部分神经元，防止模型死记硬背。
+# 评估模式下：Dropout 会被完全关闭，所有神经元全部参与计算。
+# BatchNorm 层（批归一化）（虽然 GPT-2 用的是 LayerNorm，不受这个影响，但如果是 CNN 模型就会受影响）：
+# 训练模式下：它会不断计算当前 batch 的均值和方差，并更新内部的全局均值/方差。
+# 评估模式下：它停止更新，使用训练时保存的全局均值和方差
 print("   ✅ 完成")
 print(f"\n{'=' * 70}")
 print("✅ 服务启动完成!")
@@ -213,7 +220,7 @@ async def generate_text(request: GenerateRequest):
             return _error_response("Tokenization 返回空结果!")
 
         print(f"   🚀 生成中...")
-        with torch.no_grad():
+        with torch.no_grad(): # 2. 关闭梯度计算（省显存）
             outputs = model.generate(
                 **inputs,
                 max_new_tokens=request.max_new_tokens,

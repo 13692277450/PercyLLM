@@ -29,6 +29,7 @@
 # torch：PyTorch 主库，提供张量和自动求导
 # torch.nn：神经网络模块（层、损失函数等）
 import os
+from time import sleep
 # os.environ["HF_HUB_OFFLINE"] = "1"
 
 import torch
@@ -51,10 +52,12 @@ import matplotlib.pyplot as plt
 #   - 改一个数字就能切换模型大小（比如换成 GPT-2 medium）
 #   - 所有子模块（注意力、前馈、Block）都从同一个 cfg 读取参数
 #   - 避免"魔数"散落在代码各处
+model_path = "./hfgpt2traindata"  # 模型文件夹路径
+
 GPT_CONFIG_124M = {
     # 词表大小：GPT-2 使用 BPE 分词，词汇表共 50257 个 token
     # 组成 = 50000 个 merge 单元 + 256 个字节 token + 1 个 <|endoftext|>
-    "vocab_size": 50257,
+    "vocab_size": 50260, #  # 50257 + 3 个特殊 token
 
     # 上下文长度：模型一次最多能"看到" 1024 个 token
     # 位置嵌入表的行数也只需 1024，因为位置 id 最大是 1023
@@ -78,7 +81,7 @@ GPT_CONFIG_124M = {
 
     # Q/K/V 线性层是否使用偏置：GPT-2 原版设为 False
     # 因为 LayerNorm 已经处理了均值，bias 边际收益很小
-    "qkv_bias": False,
+    "qkv_bias": True,
 }
 
 
@@ -203,8 +206,8 @@ class DummyGPTModel(nn.Module):
 
 # 加载 GPT-2 的分词器（会自动下载词表文件，第一次运行需要联网）
 # tokenizer = tiktoken.get_encoding("gpt2")
-model = AutoModelForCausalLM.from_pretrained("D:/Project/AI/PercyLLM/personagpt2final")
-tokenizer = AutoTokenizer.from_pretrained("D:/Project/AI/PercyLLM/personagpt2final")
+model = AutoModelForCausalLM.from_pretrained(model_path)
+tokenizer = AutoTokenizer.from_pretrained(model_path)
 
 
 # tokenizer = AutoTokenizer.from_pretrained("openai-community/gpt2")
@@ -418,7 +421,9 @@ for i, (y, label) in enumerate(zip([y_gelu, y_relu], ["GELU", "ReLU"]), 1):
 plt.tight_layout()  # 自动调整子图间距
 
 print("\033[33m \n===== 输出：GELU 与 ReLU 激活函数曲线对比图 =====\n\033[0m")
-plt.show()
+# plt.show()
+# sleep(2)
+# plt.close()
 
 
 # ==============================================================================
@@ -977,11 +982,14 @@ def load_hf_gpt2_weights(custom_model, safetensors_path):
     # 4. 循环替换 12 层 Transformer
     for i in range(12):
         # 拆分合并的 QKV 权重
-        qkv_weight = hf_weights[f"h.{i}.attn.c_attn.weight"]
+        # 【关键修复】先转置，把 (768, 2304) 变成 (2304, 768)，然后再按第 0 维切分
+        qkv_weight = hf_weights[f"h.{i}.attn.c_attn.weight"].t()
         qkv_bias = hf_weights[f"h.{i}.attn.c_attn.bias"]
         
+        # 按 dim=0 切分权重，每份 768
         q_w, k_w, v_w = torch.split(qkv_weight, 768, dim=0)
-        q_b, k_b, v_b = torch.split(qkv_bias, 768, dim=0)
+        # 偏置是一维的，直接用 chunk 均分成 3 份
+        q_b, k_b, v_b = torch.chunk(qkv_bias, 3, dim=0)
 
         our_state_dict[f"trf_blocks.{i}.att.W_query.weight"] = q_w
         our_state_dict[f"trf_blocks.{i}.att.W_key.weight"] = k_w
@@ -1024,7 +1032,7 @@ def load_hf_gpt2_weights(custom_model, safetensors_path):
 
 # ---- 执行加载 ----
 # 请确保你已经把 model.safetensors 下载到了本地，并把路径填在这里
-safetensors_path = "./model.safetensors" 
+safetensors_path = model_path + "/model.safetensors"  # 例如 "./model.safetensors" 
 model = load_hf_gpt2_weights(model, safetensors_path)
 
 # 重新做一次推理测试
@@ -1036,3 +1044,254 @@ out = generate_text_simple(model, encoded_tensor, max_new_tokens=10, context_siz
 decoded_text = tokenizer.decode(out.squeeze(0).tolist())
 print("\033[32m\n===== 加载权重后的生成测试 =====\033[0m")
 print("\033[33m", decoded_text)
+
+
+# ==============================================================================
+# 第 16 部分：为纯手写模型注入 LoRA 并支持多权重挂载
+# ==============================================================================
+import glob
+
+# 1. 定义带 LoRA 旁路的 Linear 层
+class LinearWithLoRA(nn.Module):
+    def __init__(self, linear, r=8, alpha=16):
+        super().__init__()
+        self.linear = linear
+        # 冻结原权重
+        for param in self.linear.parameters():
+            param.requires_grad = False
+            
+        in_features = linear.in_features
+        out_features = linear.out_features
+        
+        # LoRA 矩阵
+        self.lora_A = nn.Parameter(torch.zeros(in_features, r))
+        self.lora_B = nn.Parameter(torch.zeros(r, out_features))
+        nn.init.kaiming_uniform_(self.lora_A, a=5**0.5)
+        nn.init.zeros_(self.lora_B)
+        
+        self.scaling = alpha / r
+        self.is_active = True  # 控制是否启用此 LoRA
+
+    def forward(self, x):
+        original_out = self.linear(x)
+        if self.is_active:
+            lora_out = (x @ self.lora_A @ self.lora_B) * self.scaling
+            return original_out + lora_out
+        return original_out
+
+# 2. 注入 LoRA 到模型并管理多组权重
+class MultiLoRAManager:
+    def __init__(self, model, target_modules=["W_query", "W_key", "W_value"]):
+        self.model = model
+        self.lora_layers = [] # 记录所有被替换的 LoRA 层
+        self.adapters = {}    # 存储加载的多个权重字典 { "adapter_name": { layer_idx: state_dict } }
+        
+        # 替换目标层
+        for name, module in model.named_modules():
+            # 检查是否是目标层（比如 W_query）
+            layer_name = name.split('.')[-1]
+            if isinstance(module, nn.Linear) and layer_name in target_modules:
+                # 找到父模块，进行替换
+                parent_name = '.'.join(name.split('.')[:-1])
+                parent = model.get_submodule(parent_name)
+                new_layer = LinearWithLoRA(module)
+                setattr(parent, layer_name, new_layer)
+                self.lora_layers.append(new_layer)
+                
+        print(f"✅ 已为 {len(self.lora_layers)} 个层注入 LoRA 旁路")
+
+    def load_adapter(self, adapter_name, file_path):
+        """加载外部训练好的 LoRA 权重"""
+        print(f"📦 正在加载 LoRA 权重: {adapter_name} ({file_path})")
+        state_dict = torch.load(file_path, map_location="cpu")
+        
+        # 如果只保存了 LoRA 权重，直接按顺序赋值（简化版演示）
+        # 实际工程中建议用 state_dict 的 key 精确匹配
+        lora_state = {}
+        for k, v in state_dict.items():
+            if "lora_A" in k or "lora_B" in k:
+                lora_state[k] = v
+                
+        self.adapters[adapter_name] = lora_state
+        print(f"✅ 权重 {adapter_name} 加载成功，包含 {len(lora_state)} 个 LoRA 张量")
+
+    def switch_adapter(self, adapter_name):
+        """动态切换使用哪个 LoRA 权重"""
+        if adapter_name == "base":
+            # 关闭所有 LoRA
+            for layer in self.lora_layers:
+                layer.is_active = False
+            print("🔄 已切换到: 原始 GPT-2 (无 LoRA)")
+            return
+            
+        if adapter_name not in self.adapters:
+            print(f"❌ 找不到名为 {adapter_name} 的权重")
+            return
+            
+        # 开启所有 LoRA
+        for layer in self.lora_layers:
+            layer.is_active = True
+            
+        # 加载指定权重 (这里是简化版，按顺序塞入，实际应用建议用 zip)
+        state = self.adapters[adapter_name]
+        # 在实际代码中，你需要根据 key 名精确匹配到对应的 layer
+        # 这里假设你存的时候就是按层顺序存的
+        for i, layer in enumerate(self.lora_layers):
+            a_key = f"layer_{i}.lora_A"
+            b_key = f"layer_{i}.lora_B"
+            if a_key in state:
+                layer.lora_A.data.copy_(state[a_key])
+            if b_key in state:
+                layer.lora_B.data.copy_(state[b_key])
+                
+        print(f"🔄 已切换到: {adapter_name} 的 LoRA 权重")
+
+# 初始化 LoRA 管理器
+# 假设你有两个训练好的权重文件：lora_persona1.pt 和 lora_persona2.pt
+# lora_manager = MultiLoRAManager(model)
+# lora_manager.load_adapter("persona_1", "lora_persona1.pt")
+# lora_manager.load_adapter("persona_2", "lora_persona2.pt")
+
+# ==============================================================================
+# 第 18 部分：最简单的微调演示（让它学会对话格式）
+# ==============================================================================
+import random
+
+# # 1. 准备训练数据（至少写几条，让模型认识格式）
+# file_path = "train_data.txt"
+# train_texts = open(file_path, "r", encoding="utf-8").readlines()
+train_texts = [
+    "<|persona|>i am a engineer.<|user|>how are you<|bot|>I'm doing well, thanks!<|endoftext|>",
+    "<|persona|>i am a engineer.<|user|>what's your job?<|bot|>I design and build software.<|endoftext|>",
+    "<|persona|>i am a student.<|user|>what are you doing?<|bot|>I am studying for my exam.<|endoftext|>",
+    "<|persona|>i am an AI.<|user|>who are you<|bot|>I am an AI assistant.<|endoftext|>",
+    "<|persona|>i am an AI.<|user|>hi<|bot|>Hello! How can I help you today?<|endoftext|>",
+    "<|persona|>i am a data scientist.<|user|>are you happy<|bot|>I'm doing great, thanks!<|endoftext|>",
+    "<|persona|>i am a researcher.<|user|>do you feel sad<|bot|>I don't experience sadness.<|endoftext|>",
+    "<|persona|>i am a engineer.<|user|>do you feel sad<|bot|>I don't experience sadness.<|endoftext|>",
+    "<|persona|>i am a data scientist.<|user|>do you feel sad<|bot|>I don't experience sadness.<|endoftext|>",
+    "<|persona|>i am a researcher.<|user|>what's your job<|bot|>I create designs and prototypes.<|endoftext|>",
+    "<|persona|>i am a software developer.<|user|>what do you do<|bot|>I write and edit content.<|endoftext|>",
+    "<|persona|>i am a teacher.<|user|>how are you<|bot|>I'm doing well, thanks!<|endoftext|>",
+    "<|persona|>i am a teacher.<|user|>why<|bot|>That's a good question. It depends on the context.<|endoftext|>",
+    "<|persona|>i am a engineer.<|user|>what's your job<|bot|>I write articles and stories.<|endoftext|>",
+    "<|persona|>i am a engineer.<|user|>why<|bot|>Let me think... it's complicated.<|endoftext|>",
+    "<|persona|>i am a designer.<|user|>how old are you<|bot|>I don't have a physical age.<|endoftext|>",
+    "<|persona|>i am a writer.<|user|>do you feel sad<|bot|>I don't have feelings, but I understand yours.<|endoftext|>",
+    "<|persona|>i am a student.<|user|>are you happy<|bot|>I'm always glad to chat with you.<|endoftext|>",
+    "<|persona|>i am a student.<|user|>how are you<|bot|>I'm good, thanks for asking.<|endoftext|>",
+    "<|persona|>i am a designer.<|user|>do you like music<|bot|>Music is great, I listen often.<|endoftext|>",
+    "<|persona|>i am a researcher.<|user|>can you help me<|bot|>Of course, tell me more.<|endoftext|>",
+]
+
+print("\n🚀 开始微调 (跑 100 个 step，让模型认识对话格式)...")
+model.train()
+# 学习率稍微调大一点，因为是从随机初始化开始学
+optimizer = torch.optim.AdamW(model.parameters(), lr=3e-5)
+
+for step in range(100):
+    # 随机抽一条数据
+    text = random.choice(train_texts)
+    tokens = tokenizer.encode(text)
+    
+    # 截断到最大长度
+    tokens = tokens[:128]
+    
+    input_ids = torch.tensor(tokens).unsqueeze(0)
+    target_ids = input_ids.clone() 
+    
+    # 前向传播
+    logits = model(input_ids)
+    
+    # 交叉熵损失
+    loss = torch.nn.functional.cross_entropy(
+        logits.view(-1, logits.size(-1)), 
+        target_ids.view(-1)
+    )
+    
+    # 反向传播与更新
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    
+    if step % 20 == 0:
+        print(f"Step {step}, Loss: {loss.item():.4f}")
+    
+
+print("✅ 微调完成！")
+model.eval()
+# ==============================================================================
+
+# ==============================================================================
+# 第 17 部分：交互式多轮对话
+# ==============================================================================
+def chat_loop(model, tokenizer, max_context=1024):
+    # 初始化对话历史
+    history_tokens = []
+    
+    print("\n" + "="*50)
+    print("🤖 GPT-2 纯手写模型对话已启动")
+    print("输入 'quit' 退出，输入 '/switch <名字>' 切换 LoRA")
+    print("="*50 + "\n")
+    
+    current_lora = "base"
+    
+    while True:
+        user_input = input("\n你: ").strip()
+        
+        if user_input.lower() in ["quit", "exit", "q"]:
+            print("👋 再见！")
+            break
+            
+        if not user_input:
+            continue
+            
+        # 处理 LoRA 切换指令
+        if user_input.startswith("/switch"):
+            parts = user_input.split()
+            if len(parts) > 1:
+                current_lora = parts[1]
+                # lora_manager.switch_adapter(current_lora) # 取消注释以启用
+            continue
+            
+        # 1. 将用户输入编码，并加上特殊 Token 格式
+        # 格式： <|user|> 用户输入 <|bot|>
+        # prompt = f"<|user|>{user_input}<|bot|>"
+        # 直接用纯文本格式，GPT-2 最熟悉这个
+        prompt = f"User: {user_input}\nBot:"
+        new_tokens = tokenizer.encode(prompt)
+        
+        # 2. 拼接历史上下文
+        input_ids_list = history_tokens + new_tokens
+        
+        # 3. 裁剪上下文长度，防止超出 1024
+        if len(input_ids_list) > max_context:
+            input_ids_list = input_ids_list[-max_context:]
+            
+        input_tensor = torch.tensor(input_ids_list).unsqueeze(0).to(next(model.parameters()).device)
+        
+        # 4. 生成回答
+        with torch.no_grad():
+            out_tensor = generate_text_simple(
+                model=model, 
+                idx=input_tensor, 
+                max_new_tokens=50, 
+                context_size=max_context
+            )
+            
+        # 5. 提取新生成的 token（去掉 prompt 部分）
+        generated_ids = out_tensor[0][len(input_ids_list):].tolist()
+        response_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
+        
+        # 6. 打印回答
+        print(f"\nGPT-2: {response_text}")
+        
+        # 7. 更新历史记录 (把用户的 prompt 和 AI 的回答都加进去)
+        history_tokens = out_tensor[0].tolist()
+        # 加上 <|endoftext|> 作为分隔符
+        history_tokens.append(tokenizer.eos_token_id)
+
+# --- 启动对话 ---
+#取消下面两行的注释即可开始对话
+model.eval()
+chat_loop(model, tokenizer)

@@ -15,7 +15,7 @@ app = FastAPI(title="GPT-2 Service (HF Tokenizer Edition)")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # MODEL_DIR = "./my-gpt2-hf"
-MODEL_DIR = "./MicrosfotGPT2DialogptSmall"
+MODEL_DIR = "./MicrosoftGPT2DialogptSmall"
 
 print("=" * 70)
 print("🚀 启动 GPT-2 服务 (HuggingFace Tokenizer Version)")
@@ -63,16 +63,32 @@ def check_model_weights(model_dir, model):
     # ---------- 3. 检查权重统计量 ----------
     print(f"\n[3/5] 检查权重统计量")
     try:
+        # ============================================================
+        # 提取模型三大核心权重张量（.data 表示只取数值，不包含计算图）
+        # ============================================================
+
+        # 1. 提取 Token 嵌入矩阵 (Word Token Embedding)
+        # 形状通常是 (vocab_size, emb_dim)，比如 (50257, 768)
+        # 作用：把输入的文字 ID 转换成模型能理解的 768 维稠密向量。
         wte = model.transformer.wte.weight.data
+
+        # 2. 提取位置嵌入矩阵 (Word Position Embedding)
+        # 形状通常是 (context_length, emb_dim)，比如 (1024, 768)
+        # 作用：告诉模型每个词在句子中的相对或绝对位置（因为自注意力本身没有顺序概念）。
         wpe = model.transformer.wpe.weight.data
+
+        # 3. 提取语言模型输出头矩阵 (Language Model Head)
+        # 形状通常是 (vocab_size, emb_dim)，比如 (50257, 768)
+        # 作用：把经过 12 层 Transformer 处理后的 768 维隐藏向量，重新映射回词表大小 (50257 维)，
+        # 从而算出预测下一个词的概率（Logits）。
         lm_head = model.lm_head.weight.data
 
         print(f"   wte (token emb): shape={tuple(wte.shape)}, "
-              f"mean={wte.mean().item():.6f}, std={wte.std().item():.6f}")
+            f"mean={wte.mean().item():.6f}, std={wte.std().item():.6f}")
         print(f"   wpe (pos emb):   shape={tuple(wpe.shape)}, "
-              f"mean={wpe.mean().item():.6f}, std={wpe.std().item():.6f}")
+            f"mean={wpe.mean().item():.6f}, std={wpe.std().item():.6f}")
         print(f"   lm_head:         shape={tuple(lm_head.shape)}, "
-              f"mean={lm_head.mean().item():.6f}, std={lm_head.std().item():.6f}")
+            f"mean={lm_head.mean().item():.6f}, std={lm_head.std().item():.6f}")
 
         if wte.std().item() < 0.001:
             issues.append("wte 标准差过小，权重可能未正确加载")
@@ -115,7 +131,7 @@ def check_model_weights(model_dir, model):
         except Exception as e:
             issues.append(f"config.json 读取失败: {e}")
 
-    # ---------- 5. 检查 HF tokenizer 是否可用 ----------
+    # ---------- 5. 检查 HF tokenizer 是否可用 加载一个模型后需要进行编码解码测试以确保tokenizer正常工作 ----------
     print(f"\n[5/5] 检查 HuggingFace tokenizer")
     try:
         tok = GPT2Tokenizer.from_pretrained(model_dir)
@@ -123,7 +139,7 @@ def check_model_weights(model_dir, model):
         for t in test_texts:
             ids = tok.encode(t)
             decoded = tok.decode(ids, skip_special_tokens=True)
-            ok = "✅" if ids else "❌"
+            ok = "✅" if ids else "❌"  #一切皆可布尔化
             print(f"   {ok} '{t}': ids={ids}, decoded='{decoded}'")
             if not ids:
                 issues.append(f"tokenizer 编码失败: '{t}' 返回空")

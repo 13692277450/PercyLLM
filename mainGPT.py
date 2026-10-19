@@ -1,3 +1,4 @@
+#mainGPT.py
 #!/usr/bin/env python
 # coding: utf-8
 """
@@ -929,3 +930,76 @@ decoded_text = tokenizer.decode(out.squeeze(0).tolist())
 
 print("\033[32m \n===== 输出：把生成的 token 解码回文本 =====\n\033[0m")
 print("\033[32m", decoded_text)
+
+
+
+
+
+#######################################TRAINING###################################################
+# 读取数据
+with open("the-verdict.txt", "r", encoding="utf-8") as file:
+    text_data = file.read()
+
+# 划分 90% 训练集，10% 验证集
+train_ratio = 0.90
+split_idx = int(train_ratio * len(text_data))
+train_data = text_data[:split_idx]
+val_data = text_data[split_idx:]
+
+# ==============================================================================
+# 新增部分：训练模型并保存
+# ==============================================================================
+import torch.optim as optim
+
+# 1. 实例化你的模型（使用你手写的 GPTModel）
+torch.manual_seed(123)
+model = GPTModel(GPT_CONFIG_124M)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model.to(device)
+
+# 2. 定义优化器
+optimizer = optim.AdamW(model.parameters(), lr=0.0004, weight_decay=0.1)
+
+# 3. 简单的手写训练循环 (这里用最简单的随机截取方式，实际可用 DataLoader)
+print("开始训练...")
+model.train()
+for step in range(1000): # 跑 1000 步
+    # 随机在文本里截取一段长度为 256 的数据作为输入
+    start_idx = torch.randint(0, len(train_data) - 256, (1,)).item()
+    input_seq = train_data[start_idx : start_idx + 256]
+    
+    # 编码成 Token
+    inputs = torch.tensor(tokenizer.encode(input_seq)).unsqueeze(0).to(device)
+    
+    # 前向传播
+    logits = model(inputs)
+    
+    # 计算 Loss：用前 255 个词预测后 255 个词
+    loss = torch.nn.functional.cross_entropy(
+        logits[:, :-1, :].reshape(-1, logits.size(-1)), 
+        inputs[:, 1:].reshape(-1)
+    )
+    
+    # 反向传播
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    
+    if step % 100 == 0:
+        print(f"Step {step}, Loss: {loss.item():.4f}")
+
+print("训练完成！")
+
+
+# ==============================================================================
+# 保存模型
+# ==============================================================================
+# 方式一：保存为 PyTorch 标准的 .pth 文件（只存参数）
+torch.save(model.state_dict(), "my_trained_gpt2.pth")
+print("模型已保存为 my_trained_gpt2.pth")
+
+# 方式二：保存为 Hugging Face 兼容的 safetensors 格式（推荐）
+from safetensors.torch import save_file
+save_file(model.state_dict(), "my_trained_gpt2.safetensors")
+print("模型已保存为 my_trained_gpt2.safetensors")
+
